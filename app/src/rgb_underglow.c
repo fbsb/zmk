@@ -194,7 +194,11 @@ static int zmk_led_generate_status(void);
 
 static void zmk_led_write_pixels(void) {
     static struct led_rgb led_buffer[STRIP_NUM_PIXELS];
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     int bat0 = zmk_battery_state_of_charge();
+#else
+    int bat0 = 100;
+#endif
     int blend = 0;
     int reset_ext_power = 0;
     if (state.status_active) {
@@ -322,13 +326,16 @@ static void zmk_led_fill(struct led_rgb color, const uint8_t *addresses, size_t 
 #define ZMK_LED_SCROLLLOCK_BIT BIT(2)
 
 static int zmk_led_generate_status(void) {
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
         status_pixels[i] = (struct led_rgb){r : 0, g : 0, b : 0};
     }
 
     // BATTERY STATUS
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     zmk_led_battery_level(zmk_battery_state_of_charge(), underglow_bat_lhs,
                           DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_lhs));
+#endif
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
     uint8_t peripheral_level = 0;
@@ -365,6 +372,7 @@ static int zmk_led_generate_status(void) {
     if (!zmk_endpoints_preferred_transport_is_active())
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, output_fallback)] = red;
 
+#if IS_ENABLED(CONFIG_ZMK_BLE)
     int active_ble_profile_index = zmk_ble_active_profile_index();
     for (uint8_t i = 0;
          i < MIN(ZMK_BLE_PROFILE_COUNT, DT_PROP_LEN(UNDERGLOW_INDICATORS, ble_state)); i++) {
@@ -381,6 +389,7 @@ static int zmk_led_generate_status(void) {
             status_pixels[ble_pixel] = lilac;
         }
     }
+#endif
 
     enum zmk_usb_conn_state usb_state = zmk_usb_get_conn_state();
     if (usb_state == ZMK_USB_CONN_HID &&
@@ -406,6 +415,10 @@ static int zmk_led_generate_status(void) {
         blend = 256;
 
     return blend;
+#else
+    // For split peripherals, don't show status indicators
+    return 0;
+#endif
 }
 #endif // underglow_indicators exists
 
@@ -540,9 +553,11 @@ void zmk_rgb_set_ext_power(void) {
     int desired_state = state.on || state.status_active;
     // force power off, when battery low (<10%)
     if (state.on && !state.status_active) {
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
         if (zmk_battery_state_of_charge() < 10) {
             desired_state = false;
         }
+#endif
     }
     if (desired_state && !c_power) {
         int rc = ext_power_enable(ext_power);
